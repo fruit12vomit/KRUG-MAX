@@ -34,6 +34,7 @@ async function sendMessage(chatId, text, buttons) {
 }
 
 async function uploadAndSend(chatId, filePath, replyMid) {
+  // Шаг 1: получить URL
   const { data: up } = await axios.post(
     `${BASE}/uploads`,
     null,
@@ -41,8 +42,15 @@ async function uploadAndSend(chatId, filePath, replyMid) {
   );
 
   const uploadUrl = up.url;
-  if (!uploadUrl) throw new Error('Нет URL для загрузки');
+  const token = up.token;
 
+  console.log('Upload URL:', uploadUrl?.slice(0, 50));
+  console.log('Pre-token:', token?.slice(0, 30));
+
+  if (!uploadUrl) throw new Error('Нет URL для загрузки');
+  if (!token) throw new Error('Нет токена');
+
+  // Шаг 2: загрузить файл
   const form = new FormData();
   form.append('data', fs.createReadStream(filePath), {
     filename: 'circle.mp4',
@@ -56,28 +64,28 @@ async function uploadAndSend(chatId, filePath, replyMid) {
     responseType: 'text'
   });
 
-  let token = up.token;
-  if (!token) {
-    try {
-      const json = JSON.parse(uploadRes.data);
-      token = json.token || json.retval;
-    } catch {
-      const match = uploadRes.data.match(/<retval>([^<]+)<\/retval>/);
-      if (match) token = match[1];
-    }
-  }
+  console.log('Upload response:', uploadRes.data?.slice(0, 100));
 
-  if (!token) throw new Error('Нет токена: ' + uploadRes.data);
+  // Шаг 3: подождать обработки
+  await new Promise(r => setTimeout(r, 7000));
 
-  await new Promise(r => setTimeout(r, 6000));
-
+  // Шаг 4: отправить с токеном из шага 1
+  // Пробуем с width/height как у кружка
   const body = {
-    attachments: [{ type: 'video', payload: { token } }]
+    attachments: [{
+      type: 'video',
+      payload: {
+        token,
+        width: 480,
+        height: 480
+      }
+    }]
   };
   if (replyMid) body.link = { type: 'reply', mid: replyMid };
 
-  await axios.post(`${BASE}/messages`, body,
+  const sendRes = await axios.post(`${BASE}/messages`, body,
     { params: { chat_id: chatId }, headers: H() });
+  console.log('Send result:', JSON.stringify(sendRes.data)?.slice(0, 100));
 }
 
 function convertToCircle(src, dst) {
@@ -115,7 +123,7 @@ async function processVideo(chatId, inputPath, replyMid) {
       [{ type: 'callback', text: '🎥 Сделать ещё', payload: 'start' }]
     ]);
   } catch (e) {
-    console.error('processVideo error:', e.message);
+    console.error('Error:', e.message);
     await sendMessage(chatId, '❌ Ошибка: ' + e.message, [
       [{ type: 'callback', text: '🔄 Попробовать снова', payload: 'start' }]
     ]);
@@ -138,13 +146,7 @@ const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю в�
 app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
-  const upd = req.body;
-
-  // Логируем ВСЕ входящие обновления
-  console.log('=== INCOMING UPDATE ===');
-  console.log(JSON.stringify(upd, null, 2));
-  console.log('=== END UPDATE ===');
-
+  const upd    = req.body;
   const msg    = upd?.message;
   const chatId = msg?.recipient?.chat_id;
   const userId = msg?.sender?.user_id;
