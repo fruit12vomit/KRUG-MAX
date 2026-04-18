@@ -44,22 +44,23 @@ async function isSubscribed(userId) {
 }
 
 async function uploadAndSend(chatId, filePath, replyMid) {
-  // Шаг 1: получить URL и токен
-  const { data: up } = await axios.post(`${BASE}/uploads`, null,
-    { params: { type: 'video' }, headers: { Authorization: TOKEN } });
+  const { data: up } = await axios.post(
+    `${BASE}/uploads`,
+    null,
+    { params: { type: 'video' }, headers: { Authorization: TOKEN } }
+  );
 
   const uploadUrl = up.url;
-  const token     = up.token;
+  const token = up.token;
 
   if (!uploadUrl) throw new Error('No upload URL');
-  if (!token)     throw new Error('No token from MAX');
+  if (!token) throw new Error('No token from MAX');
 
-  console.log('Got token:', token.slice(0, 20) + '...');
-
-  // Шаг 2: загрузить файл (результат не важен — токен уже есть)
   const form = new FormData();
-  form.append('data', fs.createReadStream(filePath),
-    { filename: 'circle.mp4', contentType: 'video/mp4' });
+  form.append('data', fs.createReadStream(filePath), {
+    filename: 'circle.mp4',
+    contentType: 'video/mp4'
+  });
 
   await axios.post(uploadUrl, form, {
     headers: form.getHeaders(),
@@ -67,14 +68,13 @@ async function uploadAndSend(chatId, filePath, replyMid) {
     timeout: 120000
   }).catch(e => console.log('Upload warning:', e.message));
 
-  // Шаг 3: подождать обработки на сервере MAX
   await new Promise(r => setTimeout(r, 5000));
 
-  // Шаг 4: отправить видео с токеном
   const body = {
-    attachments: [{ type: 'video', payload: { token } }],
-    ...(replyMid ? { link: { type: 'reply', mid: replyMid } } : {})
+    attachments: [{ type: 'video', payload: { token } }]
   };
+  if (replyMid) body.link = { type: 'reply', mid: replyMid };
+
   await axios.post(`${BASE}/messages`, body,
     { params: { chat_id: chatId }, headers: H() });
 }
@@ -88,8 +88,11 @@ function convertToCircle(src, dst) {
         'format=yuv420p'
       ])
       .outputOptions([
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '28',
-        '-c:a', 'aac', '-b:a', '96k',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '28',
+        '-c:a', 'aac',
+        '-b:a', '96k',
         '-movflags', '+faststart',
         '-t', '60'
       ])
@@ -103,30 +106,28 @@ function convertToCircle(src, dst) {
 async function processVideo(chatId, inputPath, replyMid) {
   const out = inputPath + '_out.mp4';
   try {
-    await sendMessage(chatId, '⏳ Конвертирую в кружок…');
+    await sendMessage(chatId, 'Converting...');
     await convertToCircle(inputPath, out);
-    await sendMessage(chatId, '☁️ Загружаю на сервер…');
+    await sendMessage(chatId, 'Uploading...');
     await uploadAndSend(chatId, out, replyMid);
-    await sendMessage(chatId, '✅ Готово! Вот твой кружок 👆', [
-      [{ type: 'callback', text: '🎥 Сделать ещё', payload: 'start' }]
+    await sendMessage(chatId, 'Done! Your circle is above', [
+      [{ type: 'callback', text: 'Make another', payload: 'start' }]
     ]);
   } catch (e) {
     console.error(e.message);
-    await sendMessage(chatId, '❌ Ошибка: ' + e.message, [
-      [{ type: 'callback', text: '🔄 Попробовать снова', payload: 'start' }]
-    ]);
+    await sendMessage(chatId, 'Error: ' + e.message);
   } finally {
     [inputPath, out].forEach(f => fs.unlink(f, () => {}));
   }
 }
 
-const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю видео в кружочки!
+const WELCOME = `Привет! Я КРУЖОК - превращаю видео в кружочки!
 
-Просто отправь мне видео 🎥 и получи готовый кружочек за секунды ✨
+Просто отправь мне видео и получи готовый кружочек за секунды
 
-⚠️ Ограничения:
-• Длина: до 60 секунд
-• Размер: до 50 МБ
+Ограничения:
+- Длина: до 60 секунд
+- Размер: до 50 МБ
 
 Сделано с любовью
 Лиза Требухова @fruit_vomit`;
@@ -134,27 +135,82 @@ const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю в�
 app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
-  const upd    = req.body;
-  const msg    = upd?.message;
+  const upd = req.body;
+  const msg = upd?.message;
   const chatId = msg?.recipient?.chat_id;
   const userId = msg?.sender?.user_id;
-  const mid    = msg?.body?.mid;
+  const mid = msg?.body?.mid;
 
   if (upd?.update_type === 'bot_started') {
-    const startChatId = upd.chat_id || upd.message?.recipient?.chat_id;
-    await sendMessage(startChatId, WELCOME);
+    const id = upd.chat_id || upd.message?.recipient?.chat_id;
+    await sendMessage(id, WELCOME);
     return;
   }
 
   if (upd?.update_type === 'message_callback') {
-    const payload  = upd.callback?.payload;
     const cbChatId = upd.callback?.message?.recipient?.chat_id;
-    if (payload === 'start') {
-      await sendMessage(cbChatId, '🎥 Отправь мне видео — сделаю кружок!');
-    }
+    await sendMessage(cbChatId, 'Send me a video!');
     return;
   }
 
   if (upd?.update_type !== 'message_created') return;
 
-  if (CHANNEL_ID && !(await​​​​​​​​​​​​​​​​
+  const text = (msg?.body?.text || '').trim().toLowerCase();
+  const atts = msg?.body?.attachments || [];
+  const video = atts.find(a => a.type === 'video');
+
+  if (!video) {
+    if (text === '/start' || text === 'start') {
+      await sendMessage(chatId, WELCOME);
+    } else if (text) {
+      await sendMessage(chatId, 'Send me a video!');
+    }
+    return;
+  }
+
+  const url = video?.payload?.url;
+  if (!url) {
+    await sendMessage(chatId, 'Cannot get video URL');
+    return;
+  }
+
+  await sendMessage(chatId, 'Downloading...');
+
+  const inputPath = path.join(TMP, `in_${Date.now()}.mp4`);
+  try {
+    const r = await axios.get(url, {
+      responseType: 'stream',
+      headers: { Authorization: TOKEN },
+      timeout: 60000
+    });
+    await new Promise((ok, fail) => {
+      const w = fs.createWriteStream(inputPath);
+      r.data.pipe(w);
+      w.on('finish', ok);
+      w.on('error', fail);
+    });
+  } catch {
+    await sendMessage(chatId, 'Download failed');
+    return;
+  }
+
+  processVideo(chatId, inputPath, mid);
+});
+
+app.get('/', (_req, res) => res.send('MAX Circle Bot OK'));
+
+app.get('/register', async (_req, res) => {
+  const HOST = process.env.WEBHOOK_HOST;
+  try {
+    const r = await axios.post(
+      `${BASE}/subscriptions`,
+      { url: `${HOST}/webhook` },
+      { headers: H() }
+    );
+    res.send('Webhook registered: ' + JSON.stringify(r.data));
+  } catch (e) {
+    res.send('Error: ' + JSON.stringify(e.response?.data || e.message));
+  }
+});
+
+app.listen(PORT, () => console.log(`Listening on :${PORT}`));
