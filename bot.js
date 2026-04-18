@@ -34,7 +34,6 @@ async function sendMessage(chatId, text, buttons) {
 }
 
 async function uploadAndSend(chatId, filePath, replyMid) {
-  // Шаг 1: получить URL
   const { data: up } = await axios.post(
     `${BASE}/uploads`,
     null,
@@ -44,66 +43,61 @@ async function uploadAndSend(chatId, filePath, replyMid) {
   const uploadUrl = up.url;
   const token = up.token;
 
-  console.log('Upload URL:', uploadUrl?.slice(0, 50));
-  console.log('Pre-token:', token?.slice(0, 30));
-
   if (!uploadUrl) throw new Error('Нет URL для загрузки');
   if (!token) throw new Error('Нет токена');
 
-  // Шаг 2: загрузить файл
   const form = new FormData();
   form.append('data', fs.createReadStream(filePath), {
     filename: 'circle.mp4',
     contentType: 'video/mp4'
   });
 
-  const uploadRes = await axios.post(uploadUrl, form, {
+  await axios.post(uploadUrl, form, {
     headers: form.getHeaders(),
     maxBodyLength: Infinity,
     timeout: 120000,
     responseType: 'text'
-  });
+  }).catch(e => console.log('Upload warning:', e.message));
 
-  console.log('Upload response:', uploadRes.data?.slice(0, 100));
-
-  // Шаг 3: подождать обработки
   await new Promise(r => setTimeout(r, 7000));
 
-  // Шаг 4: отправить с токеном из шага 1
-  // Пробуем с width/height как у кружка
   const body = {
     attachments: [{
       type: 'video',
-      payload: {
-        token,
-        width: 480,
-        height: 480
-      }
+      payload: { token }
     }]
   };
   if (replyMid) body.link = { type: 'reply', mid: replyMid };
 
-  const sendRes = await axios.post(`${BASE}/messages`, body,
+  await axios.post(`${BASE}/messages`, body,
     { params: { chat_id: chatId }, headers: H() });
-  console.log('Send result:', JSON.stringify(sendRes.data)?.slice(0, 100));
 }
 
 function convertToCircle(src, dst) {
   return new Promise((resolve, reject) => {
     ffmpeg(src)
       .videoFilters([
+        // Обрезаем по центру в квадрат
         'crop=min(iw\\,ih):min(iw\\,ih)',
+        // Масштаб 480x480
         'scale=480:480',
+        // Круговая маска — делаем альфа-канал круглым
+        'format=yuva420p',
+        `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte(pow(X-240,2)+pow(Y-240,2),pow(240,2)),255,0)'`,
         'format=yuv420p'
       ])
       .outputOptions([
         '-c:v', 'libx264',
         '-preset', 'fast',
-        '-crf', '28',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
         '-c:a', 'aac',
         '-b:a', '96k',
         '-movflags', '+faststart',
-        '-t', '60'
+        '-t', '60',
+        // Метаданные как у видеосообщения
+        '-metadata', 'comment=videoMessage',
+        '-metadata', 'description=videoMessage'
       ])
       .output(dst)
       .on('end', resolve)
