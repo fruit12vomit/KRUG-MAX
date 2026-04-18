@@ -171,18 +171,16 @@ app.post('/webhook', async (req, res) => {
 
 app.get('/', (_req, res) => res.send('MAX Circle Bot ✅'));
 
-app.listen(PORT, () => console.log(`Listening on :${PORT}`));
-
-setTimeout(async () => {
+app.get('/register', async (_req, res) => {
   const HOST = process.env.WEBHOOK_HOST;
-  if (HOST && TOKEN) {
-    const webhookUrl = `${HOST}/webhook`;
-    try {
-      await axios.post(`${BASE}/subscriptions`, { url: webhookUrl },
-        { headers: H() });
-      console.log('✅ Webhook:', webhookUrl);
-    } catch(e) {
-      console.error('❌ Webhook error:', e.response?.data || e.message);
-    }
+  try {
+    const r = await axios.post(`${BASE}/subscriptions`,
+      { url: `${HOST}/webhook` },
+      { headers: H() });
+    res.send('✅ Webhook registered: ' + JSON.stringify(r.data));
+  } catch(e) {
+    res.send('❌ Error: ' + JSON.stringify(e.response?.data || e.message));
   }
-}, 3000);
+});
+
+app.listen(PORT, () => console.log(`Listening on :${PORT}`));
