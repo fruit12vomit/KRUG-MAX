@@ -7,10 +7,11 @@ import fs from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
 
-const TOKEN = process.env.BOT_TOKEN;
-const PORT  = process.env.PORT || 3000;
-const BASE  = 'https://platform-api.max.ru';
-const TMP   = path.join(tmpdir(), 'cbot');
+const TOKEN      = process.env.BOT_TOKEN;
+const PORT       = process.env.PORT || 3000;
+const BASE       = 'https://platform-api.max.ru';
+const CHANNEL_ID = process.env.CHANNEL_ID;
+const TMP        = path.join(tmpdir(), 'cbot');
 fs.mkdirSync(TMP, { recursive: true });
 
 const app = express();
@@ -21,6 +22,18 @@ const H = () => ({ Authorization: TOKEN, 'Content-Type': 'application/json' });
 async function sendText(chatId, text) {
   await axios.post(`${BASE}/messages`, { text },
     { params: { chat_id: chatId }, headers: H() }).catch(() => {});
+}
+
+async function isSubscribed(userId) {
+  if (!CHANNEL_ID) return true;
+  try {
+    const res = await axios.get(`${BASE}/chats/${CHANNEL_ID}/members`,
+      { headers: { Authorization: TOKEN } });
+    const members = res.data?.members || [];
+    return members.some(m => m.user_id === userId);
+  } catch {
+    return false;
+  }
 }
 
 async function uploadAndSend(chatId, filePath, replyMid) {
@@ -83,6 +96,22 @@ async function processVideo(chatId, inputPath, replyMid) {
   }
 }
 
+const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю видео в кружочки! Подпишись на этот канал, чтобы бот работал
+
+Просто отправь мне видео 🎥 и получи готовый кружочек за секунды ✨
+
+⚠️ Ограничения:
+• Длина: до 60 секунд
+• Размер: до 50 МБ
+
+Сделано с любовью
+Лиза Требухова @fruit_vomit`;
+
+const NOT_SUBSCRIBED = `🔒 Бот доступен только подписчикам канала!
+
+Подпишись и напиши мне снова 👇
+https://max.ru/channel/${CHANNEL_ID}`;
+
 app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
@@ -91,14 +120,65 @@ app.post('/webhook', async (req, res) => {
 
   const msg    = upd.message;
   const chatId = msg?.recipient?.chat_id;
+  const userId = msg?.sender?.user_id;
   const mid    = msg?.body?.mid;
   const text   = (msg?.body?.text || '').trim().toLowerCase();
   const atts   = msg?.body?.attachments || [];
   const video  = atts.find(a => a.type === 'video');
 
+  // Проверка подписки
+  if (CHANNEL_ID && !(await isSubscribed(userId))) {
+    await sendText(chatId, NOT_SUBSCRIBED);
+    return;
+  }
+
   if (!video) {
     if (text === '/start' || text === 'start') {
-      await sendText(chatId,
-        '👋 Привет! Я делаю видеокружки.\n\n' +
-        'Пришли видео в этот чат — верну его круглым 🎥\n\n' +
-        '⚙️ до
+      await sendText(chatId, WELCOME);
+    } else if (text) {
+      await sendText(chatId, '🎥 Просто отправь мне видео — сделаю кружок!');
+    }
+    return;
+  }
+
+  const url = video?.payload?.url;
+  if (!url) {
+    await sendText(chatId, '❌ Не могу получить ссылку на видео');
+    return;
+  }
+
+  await sendText(chatId, '📥 Скачиваю видео…');
+
+  const inputPath = path.join(TMP, `in_${Date.now()}.mp4`);
+  try {
+    const r = await axios.get(url, {
+      responseType: 'stream',
+      headers: { Authorization: TOKEN },
+      timeout: 60000
+    });
+    await new Promise((ok, fail) => {
+      const w = fs.createWriteStream(inputPath);
+      r.data.pipe(w);
+      w.on('finish', ok);
+      w.on('error', fail);
+    });
+  } catch {
+    await sendText(chatId, '❌ Не удалось скачать видео');
+    return;
+  }
+
+  processVideo(chatId, inputPath, mid);
+});
+
+app.get('/', (_req, res) => res.send('MAX Circle Bot ✅'));
+
+app.listen(PORT, () => console.log(`Listening on :${PORT}`));
+
+const HOST = process.env.WEBHOOK_HOST;
+if (HOST && TOKEN) {
+  const webhookUrl = `${HOST}/webhook`;
+  axios.post(`${BASE}/subscriptions`, { url: webhookUrl },
+    { headers: H() })
+    .then(() => console.log('✅ Webhook:', webhookUrl))
+    .catch(e => console.error('❌ Webhook error:', e.response?.data || e.message));
+}
