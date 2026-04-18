@@ -44,7 +44,6 @@ async function isSubscribed(userId) {
 }
 
 async function uploadAndSend(chatId, filePath, replyMid) {
-  // Шаг 1: получить URL для загрузки
   const { data: up } = await axios.post(`${BASE}/uploads`, null,
     { params: { type: 'video' }, headers: { Authorization: TOKEN } });
 
@@ -53,7 +52,6 @@ async function uploadAndSend(chatId, filePath, replyMid) {
   const uploadUrl = up.url;
   if (!uploadUrl) throw new Error('No upload URL from MAX');
 
-  // Шаг 2: загрузить файл
   const form = new FormData();
   form.append('data', fs.createReadStream(filePath),
     { filename: 'circle.mp4', contentType: 'video/mp4' });
@@ -66,14 +64,11 @@ async function uploadAndSend(chatId, filePath, replyMid) {
 
   console.log('Upload result:', JSON.stringify(upRes));
 
-  // MAX может вернуть token по-разному
   const token = upRes?.token || upRes?.retval || up?.token;
-  if (!token) throw new Error('No token from MAX upload: ' + JSON.stringify(upRes));
+  if (!token) throw new Error('No token: ' + JSON.stringify(upRes));
 
-  // Шаг 3: подождать обработки
   await new Promise(r => setTimeout(r, 4000));
 
-  // Шаг 4: отправить видео
   const body = {
     attachments: [{ type: 'video', payload: { token } }],
     ...(replyMid ? { link: { type: 'reply', mid: replyMid } } : {})
@@ -134,18 +129,6 @@ const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю в�
 Сделано с любовью
 Лиза Требухова @fruit_vomit`;
 
-const MAIN_BUTTONS = [
-  [{ type: 'callback', text: '🎥 Отправить видео', payload: 'start' }],
-  [{ type: 'callback', text: '❓ Как пользоваться', payload: 'help' }]
-];
-
-const HELP_TEXT = `📖 Как пользоваться:
-
-1. Нажми кнопку «Отправить видео»
-2. Прикрепи видеофайл из галереи
-3. Жди ~30 секунд
-4. Получи готовый кружок! ⭕️`;
-
 app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
@@ -155,17 +138,19 @@ app.post('/webhook', async (req, res) => {
   const userId = msg?.sender?.user_id;
   const mid    = msg?.body?.mid;
 
+  // Пользователь нажал кнопку "Начать" при первом входе
+  if (upd?.update_type === 'bot_started') {
+    const startChatId = upd.chat_id || upd.message?.recipient?.chat_id;
+    await sendMessage(startChatId, WELCOME);
+    return;
+  }
+
+  // Нажатие на inline кнопки
   if (upd?.update_type === 'message_callback') {
-    const payload   = upd.callback?.payload;
-    const cbChatId  = upd.callback?.message?.recipient?.chat_id;
+    const payload  = upd.callback?.payload;
+    const cbChatId = upd.callback?.message?.recipient?.chat_id;
     if (payload === 'start') {
       await sendMessage(cbChatId, '🎥 Отправь мне видео — сделаю кружок!');
-    } else if (payload === 'help') {
-      await sendMessage(cbChatId, HELP_TEXT, [
-        [{ type: 'callback', text: '◀️ Назад', payload: 'back' }]
-      ]);
-    } else if (payload === 'back') {
-      await sendMessage(cbChatId, WELCOME, MAIN_BUTTONS);
     }
     return;
   }
@@ -185,9 +170,9 @@ app.post('/webhook', async (req, res) => {
 
   if (!video) {
     if (text === '/start' || text === 'start') {
-      await sendMessage(chatId, WELCOME, MAIN_BUTTONS);
+      await sendMessage(chatId, WELCOME);
     } else if (text) {
-      await sendMessage(chatId, '🎥 Просто отправь мне видео — сделаю кружок!', MAIN_BUTTONS);
+      await sendMessage(chatId, '🎥 Просто отправь мне видео — сделаю кружок!');
     }
     return;
   }
