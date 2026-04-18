@@ -44,31 +44,33 @@ async function isSubscribed(userId) {
 }
 
 async function uploadAndSend(chatId, filePath, replyMid) {
+  // Шаг 1: получить URL и токен
   const { data: up } = await axios.post(`${BASE}/uploads`, null,
     { params: { type: 'video' }, headers: { Authorization: TOKEN } });
 
-  console.log('Upload URL response:', JSON.stringify(up));
-
   const uploadUrl = up.url;
-  if (!uploadUrl) throw new Error('No upload URL from MAX');
+  const token     = up.token;
 
+  if (!uploadUrl) throw new Error('No upload URL');
+  if (!token)     throw new Error('No token from MAX');
+
+  console.log('Got token:', token.slice(0, 20) + '...');
+
+  // Шаг 2: загрузить файл (результат не важен — токен уже есть)
   const form = new FormData();
   form.append('data', fs.createReadStream(filePath),
     { filename: 'circle.mp4', contentType: 'video/mp4' });
 
-  const { data: upRes } = await axios.post(uploadUrl, form, {
+  await axios.post(uploadUrl, form, {
     headers: form.getHeaders(),
     maxBodyLength: Infinity,
     timeout: 120000
-  });
+  }).catch(e => console.log('Upload warning:', e.message));
 
-  console.log('Upload result:', JSON.stringify(upRes));
+  // Шаг 3: подождать обработки на сервере MAX
+  await new Promise(r => setTimeout(r, 5000));
 
-  const token = upRes?.token || upRes?.retval || up?.token;
-  if (!token) throw new Error('No token: ' + JSON.stringify(upRes));
-
-  await new Promise(r => setTimeout(r, 4000));
-
+  // Шаг 4: отправить видео с токеном
   const body = {
     attachments: [{ type: 'video', payload: { token } }],
     ...(replyMid ? { link: { type: 'reply', mid: replyMid } } : {})
@@ -138,14 +140,12 @@ app.post('/webhook', async (req, res) => {
   const userId = msg?.sender?.user_id;
   const mid    = msg?.body?.mid;
 
-  // Пользователь нажал кнопку "Начать" при первом входе
   if (upd?.update_type === 'bot_started') {
     const startChatId = upd.chat_id || upd.message?.recipient?.chat_id;
     await sendMessage(startChatId, WELCOME);
     return;
   }
 
-  // Нажатие на inline кнопки
   if (upd?.update_type === 'message_callback') {
     const payload  = upd.callback?.payload;
     const cbChatId = upd.callback?.message?.recipient?.chat_id;
@@ -157,67 +157,4 @@ app.post('/webhook', async (req, res) => {
 
   if (upd?.update_type !== 'message_created') return;
 
-  if (CHANNEL_ID && !(await isSubscribed(userId))) {
-    await sendMessage(chatId,
-      '🔒 Бот доступен только подписчикам канала!\n\nПодпишись и напиши мне снова 👇\nhttps://max.ru/channel/' + CHANNEL_ID
-    );
-    return;
-  }
-
-  const text  = (msg?.body?.text || '').trim().toLowerCase();
-  const atts  = msg?.body?.attachments || [];
-  const video = atts.find(a => a.type === 'video');
-
-  if (!video) {
-    if (text === '/start' || text === 'start') {
-      await sendMessage(chatId, WELCOME);
-    } else if (text) {
-      await sendMessage(chatId, '🎥 Просто отправь мне видео — сделаю кружок!');
-    }
-    return;
-  }
-
-  const url = video?.payload?.url;
-  if (!url) {
-    await sendMessage(chatId, '❌ Не могу получить ссылку на видео');
-    return;
-  }
-
-  await sendMessage(chatId, '📥 Скачиваю видео…');
-
-  const inputPath = path.join(TMP, `in_${Date.now()}.mp4`);
-  try {
-    const r = await axios.get(url, {
-      responseType: 'stream',
-      headers: { Authorization: TOKEN },
-      timeout: 60000
-    });
-    await new Promise((ok, fail) => {
-      const w = fs.createWriteStream(inputPath);
-      r.data.pipe(w);
-      w.on('finish', ok);
-      w.on('error', fail);
-    });
-  } catch {
-    await sendMessage(chatId, '❌ Не удалось скачать видео');
-    return;
-  }
-
-  processVideo(chatId, inputPath, mid);
-});
-
-app.get('/', (_req, res) => res.send('MAX Circle Bot ✅'));
-
-app.get('/register', async (_req, res) => {
-  const HOST = process.env.WEBHOOK_HOST;
-  try {
-    const r = await axios.post(`${BASE}/subscriptions`,
-      { url: `${HOST}/webhook` },
-      { headers: H() });
-    res.send('✅ Webhook registered: ' + JSON.stringify(r.data));
-  } catch(e) {
-    res.send('❌ Error: ' + JSON.stringify(e.response?.data || e.message));
-  }
-});
-
-app.listen(PORT, () => console.log(`Listening on :${PORT}`));
+  if (CHANNEL_ID && !(await​​​​​​​​​​​​​​​​
