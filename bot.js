@@ -28,7 +28,9 @@ async function sendMessage(chatId, text, buttons) {
     }];
   }
   await axios.post(`${BASE}/messages`, body,
-    { params: { chat_id: chatId }, headers: H() }).catch(() => {});
+    { params: { chat_id: chatId }, headers: H() }).catch(e => {
+      console.error('sendMessage error:', e.response?.data || e.message);
+    });
 }
 
 async function isSubscribed(userId) {
@@ -44,39 +46,63 @@ async function isSubscribed(userId) {
 }
 
 async function uploadAndSend(chatId, filePath, replyMid) {
+  // Шаг 1: получить URL для загрузки
   const { data: up } = await axios.post(
     `${BASE}/uploads`,
     null,
     { params: { type: 'video' }, headers: { Authorization: TOKEN } }
   );
+  console.log('Step1 response:', JSON.stringify(up));
 
   const uploadUrl = up.url;
-  const token = up.token;
-
   if (!uploadUrl) throw new Error('Нет URL для загрузки');
-  if (!token) throw new Error('Нет токена от MAX');
 
+  // Шаг 2: загрузить файл и получить токен из ответа
   const form = new FormData();
   form.append('data', fs.createReadStream(filePath), {
     filename: 'circle.mp4',
     contentType: 'video/mp4'
   });
 
-  await axios.post(uploadUrl, form, {
+  const uploadRes = await axios.post(uploadUrl, form, {
     headers: form.getHeaders(),
     maxBodyLength: Infinity,
-    timeout: 120000
-  }).catch(e => console.log('Upload warning:', e.message));
+    timeout: 120000,
+    responseType: 'text'
+  });
 
-  await new Promise(r => setTimeout(r, 5000));
+  console.log('Step2 raw response:', uploadRes.data);
 
+  // Парсим токен — может быть JSON или XML
+  let token = up.token; // иногда токен в первом ответе
+  
+  if (!token) {
+    // Пробуем JSON
+    try {
+      const json = JSON.parse(uploadRes.data);
+      token = json.token || json.retval;
+    } catch {
+      // Пробуем XML: <retval>TOKEN</retval>
+      const match = uploadRes.data.match(/<retval>([^<]+)<\/retval>/);
+      if (match) token = match[1];
+    }
+  }
+
+  console.log('Token:', token);
+  if (!token) throw new Error('Нет токена: ' + uploadRes.data);
+
+  // Шаг 3: ждём обработки на сервере
+  await new Promise(r => setTimeout(r, 6000));
+
+  // Шаг 4: отправляем видео
   const body = {
     attachments: [{ type: 'video', payload: { token } }]
   };
   if (replyMid) body.link = { type: 'reply', mid: replyMid };
 
-  await axios.post(`${BASE}/messages`, body,
+  const sendRes = await axios.post(`${BASE}/messages`, body,
     { params: { chat_id: chatId }, headers: H() });
+  console.log('Send result:', JSON.stringify(sendRes.data));
 }
 
 function convertToCircle(src, dst) {
@@ -114,7 +140,7 @@ async function processVideo(chatId, inputPath, replyMid) {
       [{ type: 'callback', text: '🎥 Сделать ещё', payload: 'start' }]
     ]);
   } catch (e) {
-    console.error(e.message);
+    console.error('processVideo error:', e.message);
     await sendMessage(chatId, '❌ Ошибка: ' + e.message, [
       [{ type: 'callback', text: '🔄 Попробовать снова', payload: 'start' }]
     ]);
