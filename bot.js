@@ -126,7 +126,6 @@ app.post('/webhook', async (req, res) => {
   const atts   = msg?.body?.attachments || [];
   const video  = atts.find(a => a.type === 'video');
 
-  // Проверка подписки
   if (CHANNEL_ID && !(await isSubscribed(userId))) {
     await sendText(chatId, NOT_SUBSCRIBED);
     return;
@@ -174,11 +173,16 @@ app.get('/', (_req, res) => res.send('MAX Circle Bot ✅'));
 
 app.listen(PORT, () => console.log(`Listening on :${PORT}`));
 
-const HOST = process.env.WEBHOOK_HOST;
-if (HOST && TOKEN) {
-  const webhookUrl = `${HOST}/webhook`;
-  axios.post(`${BASE}/subscriptions`, { url: webhookUrl },
-    { headers: H() })
-    .then(() => console.log('✅ Webhook:', webhookUrl))
-    .catch(e => console.error('❌ Webhook error:', e.response?.data || e.message));
-}
+setTimeout(async () => {
+  const HOST = process.env.WEBHOOK_HOST;
+  if (HOST && TOKEN) {
+    const webhookUrl = `${HOST}/webhook`;
+    try {
+      await axios.post(`${BASE}/subscriptions`, { url: webhookUrl },
+        { headers: H() });
+      console.log('✅ Webhook:', webhookUrl);
+    } catch(e) {
+      console.error('❌ Webhook error:', e.response?.data || e.message);
+    }
+  }
+}, 3000);
