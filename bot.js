@@ -53,8 +53,8 @@ async function uploadAndSend(chatId, filePath, replyMid) {
   const uploadUrl = up.url;
   const token = up.token;
 
-  if (!uploadUrl) throw new Error('No upload URL');
-  if (!token) throw new Error('No token from MAX');
+  if (!uploadUrl) throw new Error('Нет URL для загрузки');
+  if (!token) throw new Error('Нет токена от MAX');
 
   const form = new FormData();
   form.append('data', fs.createReadStream(filePath), {
@@ -106,28 +106,30 @@ function convertToCircle(src, dst) {
 async function processVideo(chatId, inputPath, replyMid) {
   const out = inputPath + '_out.mp4';
   try {
-    await sendMessage(chatId, 'Converting...');
+    await sendMessage(chatId, '⏳ Конвертирую в кружок…');
     await convertToCircle(inputPath, out);
-    await sendMessage(chatId, 'Uploading...');
+    await sendMessage(chatId, '☁️ Загружаю на сервер…');
     await uploadAndSend(chatId, out, replyMid);
-    await sendMessage(chatId, 'Done! Your circle is above', [
-      [{ type: 'callback', text: 'Make another', payload: 'start' }]
+    await sendMessage(chatId, '✅ Готово! Кружок выше 👆', [
+      [{ type: 'callback', text: '🎥 Сделать ещё', payload: 'start' }]
     ]);
   } catch (e) {
     console.error(e.message);
-    await sendMessage(chatId, 'Error: ' + e.message);
+    await sendMessage(chatId, '❌ Ошибка: ' + e.message, [
+      [{ type: 'callback', text: '🔄 Попробовать снова', payload: 'start' }]
+    ]);
   } finally {
     [inputPath, out].forEach(f => fs.unlink(f, () => {}));
   }
 }
 
-const WELCOME = `Привет! Я КРУЖОК - превращаю видео в кружочки!
+const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю видео в кружочки!
 
-Просто отправь мне видео и получи готовый кружочек за секунды
+Просто отправь мне видео 🎥 и получи готовый кружочек за секунды ✨
 
-Ограничения:
-- Длина: до 60 секунд
-- Размер: до 50 МБ
+⚠️ Ограничения:
+• Длина: до 60 секунд
+• Размер: до 50 МБ
 
 Сделано с любовью
 Лиза Требухова @fruit_vomit`;
@@ -135,11 +137,11 @@ const WELCOME = `Привет! Я КРУЖОК - превращаю видео �
 app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
-  const upd = req.body;
-  const msg = upd?.message;
+  const upd    = req.body;
+  const msg    = upd?.message;
   const chatId = msg?.recipient?.chat_id;
   const userId = msg?.sender?.user_id;
-  const mid = msg?.body?.mid;
+  const mid    = msg?.body?.mid;
 
   if (upd?.update_type === 'bot_started') {
     const id = upd.chat_id || upd.message?.recipient?.chat_id;
@@ -149,32 +151,32 @@ app.post('/webhook', async (req, res) => {
 
   if (upd?.update_type === 'message_callback') {
     const cbChatId = upd.callback?.message?.recipient?.chat_id;
-    await sendMessage(cbChatId, 'Send me a video!');
+    await sendMessage(cbChatId, '🎥 Отправь мне видео — сделаю кружок!');
     return;
   }
 
   if (upd?.update_type !== 'message_created') return;
 
-  const text = (msg?.body?.text || '').trim().toLowerCase();
-  const atts = msg?.body?.attachments || [];
+  const text  = (msg?.body?.text || '').trim().toLowerCase();
+  const atts  = msg?.body?.attachments || [];
   const video = atts.find(a => a.type === 'video');
 
   if (!video) {
     if (text === '/start' || text === 'start') {
       await sendMessage(chatId, WELCOME);
     } else if (text) {
-      await sendMessage(chatId, 'Send me a video!');
+      await sendMessage(chatId, '🎥 Просто отправь мне видео — сделаю кружок!');
     }
     return;
   }
 
   const url = video?.payload?.url;
   if (!url) {
-    await sendMessage(chatId, 'Cannot get video URL');
+    await sendMessage(chatId, '❌ Не могу получить ссылку на видео');
     return;
   }
 
-  await sendMessage(chatId, 'Downloading...');
+  await sendMessage(chatId, '📥 Скачиваю видео…');
 
   const inputPath = path.join(TMP, `in_${Date.now()}.mp4`);
   try {
@@ -190,7 +192,7 @@ app.post('/webhook', async (req, res) => {
       w.on('error', fail);
     });
   } catch {
-    await sendMessage(chatId, 'Download failed');
+    await sendMessage(chatId, '❌ Не удалось скачать видео');
     return;
   }
 
