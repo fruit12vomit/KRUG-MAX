@@ -33,31 +33,16 @@ async function sendMessage(chatId, text, buttons) {
     });
 }
 
-async function isSubscribed(userId) {
-  if (!CHANNEL_ID) return true;
-  try {
-    const res = await axios.get(`${BASE}/chats/${CHANNEL_ID}/members`,
-      { headers: { Authorization: TOKEN } });
-    const members = res.data?.members || [];
-    return members.some(m => m.user_id === userId);
-  } catch {
-    return false;
-  }
-}
-
 async function uploadAndSend(chatId, filePath, replyMid) {
-  // Шаг 1: получить URL для загрузки
   const { data: up } = await axios.post(
     `${BASE}/uploads`,
     null,
     { params: { type: 'video' }, headers: { Authorization: TOKEN } }
   );
-  console.log('Step1 response:', JSON.stringify(up));
 
   const uploadUrl = up.url;
   if (!uploadUrl) throw new Error('Нет URL для загрузки');
 
-  // Шаг 2: загрузить файл и получить токен из ответа
   const form = new FormData();
   form.append('data', fs.createReadStream(filePath), {
     filename: 'circle.mp4',
@@ -71,38 +56,28 @@ async function uploadAndSend(chatId, filePath, replyMid) {
     responseType: 'text'
   });
 
-  console.log('Step2 raw response:', uploadRes.data);
-
-  // Парсим токен — может быть JSON или XML
-  let token = up.token; // иногда токен в первом ответе
-  
+  let token = up.token;
   if (!token) {
-    // Пробуем JSON
     try {
       const json = JSON.parse(uploadRes.data);
       token = json.token || json.retval;
     } catch {
-      // Пробуем XML: <retval>TOKEN</retval>
       const match = uploadRes.data.match(/<retval>([^<]+)<\/retval>/);
       if (match) token = match[1];
     }
   }
 
-  console.log('Token:', token);
   if (!token) throw new Error('Нет токена: ' + uploadRes.data);
 
-  // Шаг 3: ждём обработки на сервере
   await new Promise(r => setTimeout(r, 6000));
 
-  // Шаг 4: отправляем видео
   const body = {
     attachments: [{ type: 'video', payload: { token } }]
   };
   if (replyMid) body.link = { type: 'reply', mid: replyMid };
 
-  const sendRes = await axios.post(`${BASE}/messages`, body,
+  await axios.post(`${BASE}/messages`, body,
     { params: { chat_id: chatId }, headers: H() });
-  console.log('Send result:', JSON.stringify(sendRes.data));
 }
 
 function convertToCircle(src, dst) {
@@ -163,7 +138,13 @@ const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю в�
 app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
-  const upd    = req.body;
+  const upd = req.body;
+
+  // Логируем ВСЕ входящие обновления
+  console.log('=== INCOMING UPDATE ===');
+  console.log(JSON.stringify(upd, null, 2));
+  console.log('=== END UPDATE ===');
+
   const msg    = upd?.message;
   const chatId = msg?.recipient?.chat_id;
   const userId = msg?.sender?.user_id;
