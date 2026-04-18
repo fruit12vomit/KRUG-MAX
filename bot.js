@@ -136,4 +136,103 @@ const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю в�
 
 const MAIN_BUTTONS = [
   [{ type: 'callback', text: '🎥 Отправить видео', payload: 'start' }],
-  [{ type​​​​​​​​​​​​​​​​
+  [{ type: 'callback', text: '❓ Как пользоваться', payload: 'help' }]
+];
+
+const HELP_TEXT = `📖 Как пользоваться:
+
+1. Нажми кнопку «Отправить видео»
+2. Прикрепи видеофайл из галереи
+3. Жди ~30 секунд
+4. Получи готовый кружок! ⭕️`;
+
+app.post('/webhook', async (req, res) => {
+  res.json({ ok: true });
+
+  const upd    = req.body;
+  const msg    = upd?.message;
+  const chatId = msg?.recipient?.chat_id;
+  const userId = msg?.sender?.user_id;
+  const mid    = msg?.body?.mid;
+
+  if (upd?.update_type === 'message_callback') {
+    const payload   = upd.callback?.payload;
+    const cbChatId  = upd.callback?.message?.recipient?.chat_id;
+    if (payload === 'start') {
+      await sendMessage(cbChatId, '🎥 Отправь мне видео — сделаю кружок!');
+    } else if (payload === 'help') {
+      await sendMessage(cbChatId, HELP_TEXT, [
+        [{ type: 'callback', text: '◀️ Назад', payload: 'back' }]
+      ]);
+    } else if (payload === 'back') {
+      await sendMessage(cbChatId, WELCOME, MAIN_BUTTONS);
+    }
+    return;
+  }
+
+  if (upd?.update_type !== 'message_created') return;
+
+  if (CHANNEL_ID && !(await isSubscribed(userId))) {
+    await sendMessage(chatId,
+      '🔒 Бот доступен только подписчикам канала!\n\nПодпишись и напиши мне снова 👇\nhttps://max.ru/channel/' + CHANNEL_ID
+    );
+    return;
+  }
+
+  const text  = (msg?.body?.text || '').trim().toLowerCase();
+  const atts  = msg?.body?.attachments || [];
+  const video = atts.find(a => a.type === 'video');
+
+  if (!video) {
+    if (text === '/start' || text === 'start') {
+      await sendMessage(chatId, WELCOME, MAIN_BUTTONS);
+    } else if (text) {
+      await sendMessage(chatId, '🎥 Просто отправь мне видео — сделаю кружок!', MAIN_BUTTONS);
+    }
+    return;
+  }
+
+  const url = video?.payload?.url;
+  if (!url) {
+    await sendMessage(chatId, '❌ Не могу получить ссылку на видео');
+    return;
+  }
+
+  await sendMessage(chatId, '📥 Скачиваю видео…');
+
+  const inputPath = path.join(TMP, `in_${Date.now()}.mp4`);
+  try {
+    const r = await axios.get(url, {
+      responseType: 'stream',
+      headers: { Authorization: TOKEN },
+      timeout: 60000
+    });
+    await new Promise((ok, fail) => {
+      const w = fs.createWriteStream(inputPath);
+      r.data.pipe(w);
+      w.on('finish', ok);
+      w.on('error', fail);
+    });
+  } catch {
+    await sendMessage(chatId, '❌ Не удалось скачать видео');
+    return;
+  }
+
+  processVideo(chatId, inputPath, mid);
+});
+
+app.get('/', (_req, res) => res.send('MAX Circle Bot ✅'));
+
+app.get('/register', async (_req, res) => {
+  const HOST = process.env.WEBHOOK_HOST;
+  try {
+    const r = await axios.post(`${BASE}/subscriptions`,
+      { url: `${HOST}/webhook` },
+      { headers: H() });
+    res.send('✅ Webhook registered: ' + JSON.stringify(r.data));
+  } catch(e) {
+    res.send('❌ Error: ' + JSON.stringify(e.response?.data || e.message));
+  }
+});
+
+app.listen(PORT, () => console.log(`Listening on :${PORT}`));
