@@ -19,15 +19,8 @@ app.use(express.json());
 
 const H = () => ({ Authorization: TOKEN, 'Content-Type': 'application/json' });
 
-async function sendMessage(chatId, text, buttons) {
-  const body = { text };
-  if (buttons) {
-    body.attachments = [{
-      type: 'inline_keyboard',
-      payload: { buttons }
-    }];
-  }
-  await axios.post(`${BASE}/messages`, body,
+async function sendMessage(chatId, text) {
+  await axios.post(`${BASE}/messages`, { text },
     { params: { chat_id: chatId }, headers: H() }).catch(e => {
       console.error('sendMessage error:', e.response?.data || e.message);
     });
@@ -102,14 +95,10 @@ async function processVideo(chatId, inputPath, replyMid) {
     await convertToCircle(inputPath, out);
     await sendMessage(chatId, '☁️ Загружаю на сервер…');
     await uploadAndSend(chatId, out, replyMid);
-    await sendMessage(chatId, '✅ Готово! Видео выше 👆', [
-      [{ type: 'callback', text: '🎥 Сделать ещё', payload: 'start' }]
-    ]);
+    await sendMessage(chatId, '✅ Готово! Видео выше 👆');
   } catch (e) {
     console.error('Error:', e.message);
-    await sendMessage(chatId, '❌ Ошибка: ' + e.message, [
-      [{ type: 'callback', text: '🔄 Попробовать снова', payload: 'start' }]
-    ]);
+    await sendMessage(chatId, '❌ Ошибка: ' + e.message);
   } finally {
     [inputPath, out].forEach(f => fs.unlink(f, () => {}));
   }
@@ -128,28 +117,17 @@ const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю в�
 Сделано с любовью
 Лиза Требухова @fruit_vomit`;
 
-const WAIT_TEXT = `🎥 Отправь мне видео — обрежу по центру и верну квадратным 480×480!
-
-ℹ️ МАХ пока не поддерживает круглые видео от ботов — ждём обновления от команды MAX!`;
-
 app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
   const upd    = req.body;
   const msg    = upd?.message;
   const chatId = msg?.recipient?.chat_id;
-  const userId = msg?.sender?.user_id;
   const mid    = msg?.body?.mid;
 
   if (upd?.update_type === 'bot_started') {
     const id = upd.chat_id || upd.message?.recipient?.chat_id;
     await sendMessage(id, WELCOME);
-    return;
-  }
-
-  if (upd?.update_type === 'message_callback') {
-    const cbChatId = upd.callback?.message?.recipient?.chat_id;
-    await sendMessage(cbChatId, WAIT_TEXT);
     return;
   }
 
