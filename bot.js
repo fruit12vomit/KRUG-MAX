@@ -126,6 +126,16 @@ app.post('/webhook', async (req, res) => {
     console.log('UPDATE', safe.slice(0, 4000));
   } catch {}
   const msg    = upd?.message;
+  try {
+    const all = [...(msg?.body?.attachments || []), ...(msg?.link?.message?.attachments || [])];
+    for (const a of all) {
+      if (a.type === 'video' && a.payload?.token) {
+        const { data } = await axios.get(`${BASE}/videos/${a.payload.token}`, { headers: H() });
+        const safe = JSON.stringify(data, (k, v) => (k === 'url' || /^mp4_|^hls|^dash/.test(k) ? '[url]' : v));
+        console.log('VIDEOINFO', safe.slice(0, 3000));
+      }
+    }
+  } catch (e) { console.log('VIDEOINFO error', e.response?.status, JSON.stringify(e.response?.data || e.message).slice(0, 300)); }
   const chatId = msg?.recipient?.chat_id;
   const mid    = msg?.body?.mid;
 
