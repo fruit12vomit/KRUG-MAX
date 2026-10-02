@@ -104,6 +104,37 @@ async function processVideo(chatId, inputPath, replyMid) {
   }
 }
 
+// Проверка: какие варианты вложения MAX примет для кружка.
+// Срабатывает только на видео с подписью /probe и пишет только в чат отправителя.
+async function probeRound(chatId, videoToken) {
+  const hide = (x) => JSON.stringify(x, (k, v) => (k === 'url' || k === 'token' ? '[hidden]' : v)).slice(0, 400);
+  const out = [];
+  for (const t of ['video_message', 'videoMessage', 'video_note', 'round_video', 'round', 'circle', 'videomsg', 'VIDEO_MESSAGE']) {
+    try {
+      const { data } = await axios.post(`${BASE}/uploads`, null, { params: { type: t }, headers: { Authorization: TOKEN } });
+      out.push(`upload ${t}: OK ${hide(data)}`);
+    } catch (e) { out.push(`upload ${t}: ${e.response?.status} ${hide(e.response?.data || e.message)}`); }
+  }
+  const variants = [
+    { type: 'video_message', payload: { token: videoToken } },
+    { type: 'video_note', payload: { token: videoToken } },
+    { type: 'round_video', payload: { token: videoToken } },
+    { type: 'video', payload: { token: videoToken, is_round: true } },
+    { type: 'video', payload: { token: videoToken, round: true } },
+    { type: 'video', payload: { token: videoToken, video_type: 'round' } },
+    { type: 'video', payload: { token: videoToken, type: 'VIDEO_MESSAGE' } },
+  ];
+  for (const a of variants) {
+    const label = a.type + ' ' + JSON.stringify(Object.keys(a.payload).filter(k => k !== 'token').reduce((o, k) => (o[k] = a.payload[k], o), {}));
+    try {
+      const { data } = await axios.post(`${BASE}/messages`, { text: 'probe: ' + label, attachments: [a] }, { params: { chat_id: chatId }, headers: H() });
+      out.push(`send ${label}: OK ${hide(data?.message?.body?.attachments || data)}`);
+    } catch (e) { out.push(`send ${label}: ${e.response?.status} ${hide(e.response?.data || e.message)}`); }
+  }
+  for (const line of out) console.log('PROBE', line);
+  await sendMessage(chatId, '🔎 Проверка закончена, результаты в логе');
+}
+
 const WELCOME = `⭕️ Привет! Я КРУЖОК — превращаю видео в кружочки!
 
 Просто отправь мне видео 🎥 и получи готовый кружочек за секунды ✨
@@ -150,6 +181,11 @@ app.post('/webhook', async (req, res) => {
   const text  = (msg?.body?.text || '').trim().toLowerCase();
   const atts  = msg?.body?.attachments || [];
   const video = atts.find(a => a.type === 'video');
+
+  if (video && text.startsWith('/probe') && video.payload?.token) {
+    await probeRound(chatId, video.payload.token);
+    return;
+  }
 
   if (!video) {
     if (text === '/start' || text === 'start') {
