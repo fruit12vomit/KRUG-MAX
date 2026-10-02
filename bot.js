@@ -9,7 +9,7 @@ import { tmpdir } from 'os';
 
 const TOKEN      = process.env.BOT_TOKEN;
 const PORT       = process.env.PORT || 3000;
-const BASE       = 'https://platform-api.max.ru';
+const BASE       = 'https://platform-api2.max.ru';
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const TMP        = path.join(tmpdir(), 'cbot');
 fs.mkdirSync(TMP, { recursive: true });
@@ -121,6 +121,10 @@ app.post('/webhook', async (req, res) => {
   res.json({ ok: true });
 
   const upd    = req.body;
+  try {
+    const safe = JSON.stringify(upd, (k, v) => (k === 'url' ? '[url]' : v));
+    console.log('UPDATE', safe.slice(0, 4000));
+  } catch {}
   const msg    = upd?.message;
   const chatId = msg?.recipient?.chat_id;
   const mid    = msg?.body?.mid;
